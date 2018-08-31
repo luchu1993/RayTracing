@@ -3,6 +3,9 @@
 #include <iostream>
 
 namespace rt {
+
+class material;
+
 class vec3 {
 public:
     vec3() { }
@@ -14,8 +17,8 @@ public:
     inline float r() const { return e[0]; }
     inline float g() const { return e[1]; }
     inline float b() const { return e[2]; }
-    inline const vec3& operator+() { return *this; }
-    inline vec3 operator-() { return vec3(-e[0], -e[1], -e[2]); }
+    inline const vec3& operator+() const { return *this; }
+    inline vec3 operator-() const { return vec3(-e[0], -e[1], -e[2]); }
     inline float operator[](int i) const { return e[i]; } 
     inline float& operator[](int i) { return e[i]; } 
 
@@ -81,12 +84,30 @@ public:
     vec3 A;
     vec3 B;
 };
+vec3 random_unit_sphere();
+
+inline vec3 reflect(const vec3& v, const vec3& n)
+{
+    return v - 2.0f * dot(n, v) * n;
+}
+
+bool refract(const vec3& v, const vec3& n, float ni_over_nt, vec3& refracted);
+float schlick(float cosine, float ref_idx);
+
+inline float clamp(float f, float min, float max)
+{
+    float ret = f;
+    if (f < min) ret = f;
+    if (f > max) ret = f;
+    return f;
+}
 
 typedef struct
 {
     float t;
     vec3 point;
     vec3 normal;
+    material* mat_ptr;
 } hit_record;
 
 class hitable
@@ -111,10 +132,12 @@ class sphere : public hitable
 public:
     sphere() { }
     sphere(vec3 const& cen, float r) : center(cen), radius(r) { }
+    sphere(vec3 const& cen, float r, material* mat) : center(cen), radius(r), mat_ptr(mat) { }
     virtual bool hit(const ray& r, float t_min, float t_max, hit_record& rec) const;
 
     vec3 center;
     float radius;
+    material* mat_ptr;
 };
 
 class camera 
@@ -128,7 +151,10 @@ public:
         vertical = vec3(0.0f, 2.0f, 0.0f);
     }
 
-    ray get_ray(float u, float v)
+    camera(rt::vec3 look_from, rt::vec3 look_at, rt::vec3 up, float fov, float aspect);
+
+
+    inline ray get_ray(float u, float v)
     {
         return ray(origin, lower_left_corner + u*horizontal + v*vertical - origin);
     }
@@ -139,6 +165,37 @@ public:
     vec3 vertical;
 };
 
-vec3 random_unit_sphere();
+class material 
+{
+public:
+    virtual bool scatter(const ray& r_in, const hit_record& rec, vec3& attenuation, ray& scattered) const = 0;
+};
+
+class lambertian : public material
+{
+public:
+    lambertian(const vec3& a) : albedo(a) { }
+    virtual bool scatter(const ray& r_in, const hit_record& rec, vec3& attenuation, ray& scattered) const;
+
+    vec3 albedo;
+};
+
+class metal : public material
+{
+public:
+    metal(const vec3& a) : albedo(a), fuzz(0.0f) { }
+    metal(const vec3& a, float f) : albedo(a), fuzz(clamp(f, 0.0f, 1.0f)) { }
+    virtual bool scatter(const ray& r_in, const hit_record& rec, vec3& attenuation, ray& scattered) const;
+    vec3 albedo;
+    float fuzz;
+};
+
+class dielectric : public material
+{
+public:
+    dielectric(float ri) : ref_idx(ri) { }
+    virtual bool scatter(const ray& r_in, const hit_record& rec, vec3& attenuation, ray& scattered) const;
+    float ref_idx;
+};
 
 }

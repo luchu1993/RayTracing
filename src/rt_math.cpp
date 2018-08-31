@@ -154,6 +154,29 @@ vec3 rt::normalize(const vec3& v)
     );
 }
 
+
+rt::camera::camera
+(
+    rt::vec3 look_from, 
+    rt::vec3 look_at, 
+    rt::vec3 up, 
+    float fov, 
+    float aspect
+)  
+{
+    rt::vec3 u, v, w;
+    float theta = fov / 180.0f * M_PI;
+    float half_height = tan(theta/2.0f);
+    float half_width = half_height * aspect;
+    origin = look_from;
+    w = rt::normalize(look_from - look_at);
+    u = rt::normalize(rt::cross(up, w));
+    v = rt::cross(w, u);
+    lower_left_corner = origin - half_width * u - half_height * v - w;
+    horizontal = 2.0f * half_width * u;
+    vertical = 2.0f * half_height * v;
+}
+
 bool rt::sphere::hit(const ray& r, float t_min, float t_max, hit_record& rec) const
 {
     vec3 oc = r.origin() - center;
@@ -169,6 +192,7 @@ bool rt::sphere::hit(const ray& r, float t_min, float t_max, hit_record& rec) co
             rec.t = t;
             rec.point = r.point_at_parameter(t);
             rec.normal = (rec.point - center) / radius; 
+            rec.mat_ptr = mat_ptr;
             return true;
         }
 
@@ -178,6 +202,7 @@ bool rt::sphere::hit(const ray& r, float t_min, float t_max, hit_record& rec) co
             rec.t = t;
             rec.point = r.point_at_parameter(t);
             rec.normal = (rec.point - center) / radius; 
+            rec.mat_ptr = mat_ptr;
             return true;
         }
     }
@@ -212,3 +237,86 @@ vec3 rt::random_unit_sphere()
     
     return p;
 }
+
+bool rt::lambertian::scatter(const ray& r_in, const hit_record& rec, vec3& attenuation, ray& scattered) const
+{
+    vec3 target = rec.point + rec.normal + random_unit_sphere();
+    scattered = ray(rec.point, target - rec.point);
+    attenuation = albedo;
+    return true;
+}
+
+bool rt::metal::scatter(const ray& r_in, const hit_record& rec, vec3& attenuation, ray& scattered) const
+{
+    vec3 reflected = reflect( normalize(r_in.direction()), rec.normal);
+    if (fuzz != 0.0f)
+        scattered = ray(rec.point, reflected + fuzz * random_unit_sphere());
+    else
+        scattered = ray(rec.point, reflected);
+    attenuation = albedo;
+    return dot(scattered.direction(), rec.normal) > 0;
+}
+
+bool rt::dielectric::scatter(const ray& r_in, const hit_record& rec, vec3& attenuation, ray& scattered) const
+{
+    vec3 outward_normal;
+    vec3 dir = normalize(r_in.direction());
+    vec3 reflected = reflect(dir, rec.normal);
+    float ni_over_nt;
+    attenuation = vec3(1.0f, 1.0f, 1.0f);
+    vec3 refracted;
+    float cosine, reflect_prob;
+
+    if (dot(dir, rec.normal) > 0)
+    {
+        outward_normal = -rec.normal;
+        ni_over_nt = ref_idx;
+        cosine = dot(dir, rec.normal);
+    }
+    else
+    {
+        outward_normal = rec.normal;
+        ni_over_nt = 1.0f/ref_idx;
+        cosine = -dot(dir, rec.normal);
+    }
+    if (refract(dir, outward_normal, ni_over_nt, refracted))
+        reflect_prob = rt::schlick(cosine, ref_idx);
+    else
+        reflect_prob = 1.0f;
+    
+    if (drand48() < reflect_prob)
+        scattered = ray(rec.point, reflected);
+    else
+        scattered = ray(rec.point, refracted);
+
+    return true;
+}
+
+bool rt::refract(const vec3& v, const vec3& n, float ni_over_nt, vec3& refracted)
+{
+    vec3 uv = rt::normalize(v);
+    float dt = dot(uv, n);
+    float discriminant = 1.0 - ni_over_nt*ni_over_nt*(1-dt*dt);
+    if (discriminant > 0.0f)
+    {
+        refracted = ni_over_nt*(uv - n*dt) - n*sqrt(discriminant);
+        return true;
+    }
+    else
+        return false;
+}
+
+/*
+ * @description: Schlick's approximation
+ *  R(\theta) = R_0 + (1-R_0)(1-\cos\theta)^5
+ *  where R_0 = (\frac{n_1-n_2}{n_1+n_2})^2, n_1 and n_2 
+ *  are the indices of the two media at the interface,
+ *  and \cos\theta = dot(N, N).
+ */
+float rt::schlick(float cosine, float ref_idx)
+{
+    float r = (1.0f - ref_idx) / (1.0f + ref_idx);
+    r = r * r;
+    return r + (1.0f - r) * pow(1.0f - cosine, 5.0f);
+}
+
